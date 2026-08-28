@@ -5,8 +5,11 @@
   "description": "批量导出闲鱼聊天记录，支持单聊、断点恢复和本地媒体归档",
   "permissions": ["activeTab", "scripting", "downloads", "storage"],
   "host_permissions": [
+    "*://xianyu.com/*",
     "*://*.xianyu.com/*",
+    "*://goofish.com/*",
     "*://*.goofish.com/*",
+    "*://fiverr.com/*",
     "*://*.fiverr.com/*",
     "*://*.alicdn.com/*",
     "*://*.tbcdn.cn/*",
@@ -18,7 +21,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.xianyu.com/*", "*://*.goofish.com/*", "*://*.fiverr.com/*"],
+      "matches": [
+        "*://xianyu.com/*",
+        "*://*.xianyu.com/*",
+        "*://goofish.com/*",
+        "*://*.goofish.com/*",
+        "*://fiverr.com/*",
+        "*://*.fiverr.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

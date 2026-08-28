@@ -17,10 +17,35 @@
       else resolve(response);
     });
   });
-  const sendTab = payload => {
-    if (!activeTab || !activeTab.id) return Promise.reject(new Error('没有可用的网页标签页'));
-    return chrome.tabs.sendMessage(activeTab.id, payload);
-  };
+  const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+  async function sendTab(payload) {
+    if (!activeTab || !activeTab.id) throw new Error('没有可用的网页标签页');
+    try {
+      return await chrome.tabs.sendMessage(activeTab.id, payload);
+    } catch (firstError) {
+      // A tab that was already open before the extension was installed or updated
+      // may not have the content script yet. Inject it once and retry the request.
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ['content.js'] });
+        await wait(50);
+        return await chrome.tabs.sendMessage(activeTab.id, payload);
+      } catch (retryError) {
+        throw new Error(connectionErrorMessage(retryError || firstError));
+      }
+    }
+  }
+
+  function connectionErrorMessage(error) {
+    const message = error && error.message ? error.message : String(error || '');
+    if (/Receiving end does not exist|Could not establish connection|message port closed/i.test(message)) {
+      return '当前闲鱼页面还没有加载插件脚本，请刷新闲鱼页面后重新打开插件。';
+    }
+    if (/Cannot access contents of url|The extensions gallery cannot be scripted|Cannot access a chrome-extension/i.test(message)) {
+      return '当前页面不允许插件读取，请切换到已登录的闲鱼网页后再试。';
+    }
+    return '无法连接当前闲鱼页面：' + message;
+  }
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -53,7 +78,15 @@
       startPolling();
     } catch (error) {
       $('loading').classList.add('hidden');
-      showUnsupported(error.message || '无法读取当前页面');
+      if (currentPlatform !== 'unknown') {
+        $('app').classList.remove('hidden');
+        showNotice(connectionErrorMessage(error), true);
+        renderMessages();
+        await refreshJob();
+        startPolling();
+      } else {
+        showUnsupported(error.message || '无法读取当前页面');
+      }
     }
   }
 
@@ -92,6 +125,8 @@
   }
 
   function showUnsupported(message) {
+    $('loading').classList.add('hidden');
+    $('app').classList.add('hidden');
     $('unsupported').classList.remove('hidden');
     if (message) $('unsupported').querySelector('div:last-child').textContent = message;
   }

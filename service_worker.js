@@ -71,8 +71,19 @@ async function sendToTab(tabId, payload) {
   if (!tabId) throw new Error('没有可用的闲鱼页面标签页');
   try {
     return await chrome.tabs.sendMessage(tabId, payload);
-  } catch (error) {
-    throw new Error('无法连接闲鱼页面：' + (error.message || error));
+  } catch (firstError) {
+    // Recover when the tab was opened before the extension was installed or updated.
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+      await sleep(50);
+      return await chrome.tabs.sendMessage(tabId, payload);
+    } catch (retryError) {
+      const message = retryError && retryError.message ? retryError.message : String(retryError || firstError);
+      if (/Receiving end does not exist|Could not establish connection|message port closed/i.test(message)) {
+        throw new Error('当前闲鱼页面还没有加载插件脚本，请刷新页面后继续任务。');
+      }
+      throw new Error('无法连接闲鱼页面：' + message);
+    }
   }
 }
 
