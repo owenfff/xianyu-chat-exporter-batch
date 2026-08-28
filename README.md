@@ -9,8 +9,10 @@ A local Chrome extension for organizing and saving Xianyu chat history. It suppo
 - Scan the conversations visible on the current Xianyu page with a configurable limit (20 by default), then choose which ones to export
 - Open conversations one at a time and load older messages through the page UI
 - Capture text, images, videos, and quoted messages
+- Record the current item/product name in the exported files when available
 - Download available media locally and place it beside the exported HTML
 - Pause, resume, stop, and recover progress after reopening the popup
+- Show in-extension success messages and attempt browser notifications after scanning and exporting
 - Export a single conversation as HTML or Markdown
 - Keep the original media URL and failure reason when a media download is unavailable
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "闲鱼聊天记录批量导出",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "批量导出闲鱼聊天记录，支持单聊、断点恢复和本地媒体归档",
-  "permissions": ["activeTab", "scripting", "downloads", "storage"],
+  "permissions": ["activeTab", "scripting", "downloads", "storage", "notifications"],
   "host_permissions": [
     "*://xianyu.com/*",
     "*://*.xianyu.com/*",

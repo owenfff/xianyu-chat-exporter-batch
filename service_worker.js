@@ -230,6 +230,7 @@ async function runJob(jobId) {
           const media = await downloadMediaForConversation(jobId, conversation.id);
           await updateConversation(jobId, conversation.id, item => {
             item.status = 'completed';
+            if (response.productName) item.productName = response.productName;
             item.messageCount = response.messageCount || 0;
             item.mediaCount = media.downloaded;
             item.mediaFailed = media.failed;

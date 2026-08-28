@@ -4,6 +4,7 @@
   let activeTab = null;
   let currentPlatform = 'unknown';
   let currentTitle = '聊天记录';
+  let currentProductName = '';
   let messages = [];
   let conversations = [];
   let job = null;
@@ -71,6 +72,7 @@
       const response = await sendTab({ action: 'GET_CURRENT_MESSAGES' });
       if (response && response.ok) {
         currentTitle = response.chatTitle || currentTitle;
+        currentProductName = response.productName || '';
         messages = (response.messages || []).map(message => Object.assign({ selected: true }, message));
       }
       renderMessages();
@@ -139,6 +141,21 @@
     element.style.color = isError ? '#9b1c1c' : '';
   }
 
+  function showNotification(title, message) {
+    if (!chrome.notifications || !chrome.notifications.create) return;
+    try {
+      chrome.notifications.create('xianyu-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icon128.svg'),
+        title,
+        message,
+        priority: 0
+      }, () => { void chrome.runtime.lastError; });
+    } catch (_) {
+      // The in-popup notice remains available if notifications are unavailable.
+    }
+  }
+
   function renderMessages() {
     const list = $('messageList');
     list.innerHTML = '';
@@ -185,6 +202,9 @@
       showNotice(conversations.length
         ? '扫描完成，共发现 ' + conversations.length + ' 个会话（上限 ' + limit + ' 个）。'
         : '没有发现可导出的会话。');
+      showNotification('扫描完成', conversations.length
+        ? '已发现 ' + conversations.length + ' 个会话。'
+        : '没有发现可导出的会话。');
     } catch (error) {
       showNotice(error.message || '扫描失败', true);
     } finally {
@@ -201,11 +221,13 @@
     conversations.forEach((conversation, index) => {
       const item = document.createElement('label');
       item.className = 'conversation-item';
+      const preview = [conversation.productName ? '商品：' + conversation.productName : '', conversation.preview]
+        .filter(Boolean).join(' · ');
       item.innerHTML = '<input type="checkbox" data-index="' + index + '"' + (conversation.selected ? ' checked' : '') +
         '><div class="conversation-main"><div class="conversation-meta"><span class="conversation-title">' +
         XianyuExporter.escapeHtml(conversation.title) + '</span><span class="time">' +
         XianyuExporter.escapeHtml(conversation.status || '') + '</span></div><div class="conversation-preview">' +
-        XianyuExporter.escapeHtml(conversation.preview || '') + '</div></div>';
+        XianyuExporter.escapeHtml(preview) + '</div></div>';
       item.querySelector('input').addEventListener('change', event => {
         conversations[index].selected = event.target.checked;
         updateConversationStatus();
@@ -315,12 +337,13 @@
       showNotice('请至少选择一条消息。', true);
       return;
     }
-    const conversation = { title: currentTitle };
+    const conversation = { title: currentTitle, productName: currentProductName };
     const content = format === 'html'
       ? XianyuExporter.renderConversationHtml(conversation, selected, {}, { fromConversationFile: false })
       : XianyuExporter.renderConversationMarkdown(conversation, selected, {}, { fromConversationFile: false });
     downloadBlob(content, '聊天记录_' + XianyuExporter.safeFileName(currentTitle, '聊天记录') + '_' +
       XianyuExporter.dateString() + (format === 'html' ? '.html' : '.md'), format === 'html' ? 'text/html' : 'text/markdown');
+    showNotification('导出成功', '当前聊天记录已开始下载。');
     if ($('debugMode').checked) downloadBlob(JSON.stringify({ exportTime: new Date().toISOString(), conversation, messages: selected }, null, 2),
       '调试数据_' + XianyuExporter.safeFileName(currentTitle, '聊天记录') + '.json', 'application/json');
   }
@@ -335,6 +358,9 @@
       showNotice(result.skipped
         ? 'ZIP 导出完成，已包含 ' + result.exported + ' 个已处理会话，跳过 ' + result.skipped + ' 个未处理会话。'
         : 'ZIP 导出完成。');
+      showNotification('导出成功', result.skipped
+        ? 'ZIP 已开始下载，包含 ' + result.exported + ' 个会话。'
+        : '聊天记录 ZIP 已开始下载。');
     } catch (error) {
       showNotice(error.message || 'ZIP 导出失败', true);
     } finally {
@@ -411,6 +437,7 @@
       manifest.conversations.push({
         id: conversation.id,
         title: conversation.title,
+        productName: conversation.productName || '',
         status: conversation.status,
         messageCount: messagesForConversation.length,
         mediaCount: mediaRecords.filter(record => record.status === 'downloaded').length,
@@ -467,7 +494,10 @@
     const url = URL.createObjectURL(blob);
     chrome.downloads.download({ url, filename, saveAs: saveAs !== false }, () => {
       const error = chrome.runtime.lastError;
-      if (error) showNotice(error.message, true);
+      if (error) {
+        showNotice(error.message, true);
+        showNotification('导出失败', error.message);
+      }
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     });
   }

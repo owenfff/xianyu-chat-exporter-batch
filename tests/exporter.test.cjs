@@ -33,3 +33,11 @@ test('failed media keeps the original URL in HTML', () => {
   );
   assert.ok(html.includes('https://img.alicdn.com/expired.jpg'));
 });
+
+test('HTML and Markdown exports include the conversation product name', () => {
+  const conversation = { title: '张三', productName: '西湖门票+导游讲解' };
+  const html = exporter.renderConversationHtml(conversation, [], {}, { fromConversationFile: true });
+  const markdown = exporter.renderConversationMarkdown(conversation, [], {}, { fromConversationFile: true });
+  assert.ok(html.includes('商品：西湖门票+导游讲解'));
+  assert.ok(markdown.includes('商品：西湖门票+导游讲解'));
+});

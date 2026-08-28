@@ -100,6 +100,7 @@
     const opts = options || {};
     const fromConversationFile = opts.fromConversationFile !== false;
     const title = conversation && conversation.title ? conversation.title : '聊天记录';
+    const productName = conversation && conversation.productName ? conversation.productName : '';
     const rows = (messages || []).map(message => renderMessage(message, mediaByUrl || {}, fromConversationFile)).join('\n');
     return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -108,20 +109,25 @@
       '.wrap{max-width:900px;margin:0 auto;padding:28px 18px 50px}.head{background:#fff;border-radius:14px;padding:20px 22px;margin-bottom:18px;box-shadow:0 2px 12px #0000000d}' +
       'h1{font-size:22px;margin:0 0 8px}.sub{color:#7b8088;font-size:12px}.message{display:flex;flex-direction:column;margin:14px 0;max-width:78%}' +
       '.message.mine{margin-left:auto;align-items:flex-end}.message.theirs{margin-right:auto;align-items:flex-start}.meta{display:flex;align-items:center;gap:7px;color:#8a9099;font-size:12px;margin:0 8px 4px}.avatar{width:22px;height:22px;border-radius:50%;object-fit:cover}' +
-      '.sender{font-weight:600;color:#555}.bubble{background:#fff;border-radius:12px;padding:10px 13px;box-shadow:0 2px 8px #0000000a;overflow:hidden}' +
+      '.sender{font-weight:600;color:#555}.product{margin-top:5px;color:#555;font-size:13px;word-break:break-word}.bubble{background:#fff;border-radius:12px;padding:10px 13px;box-shadow:0 2px 8px #0000000a;overflow:hidden}' +
       '.mine .bubble{background:#fff4bd}.text{white-space:normal;word-break:break-word}.media{display:block;max-width:min(520px,70vw);max-height:620px;border-radius:8px;object-fit:contain}.video{background:#111}.quote{margin-bottom:8px;padding:8px 10px;border-left:3px solid #e0b400;background:#fffbe5;color:#656a73;font-size:12px;max-width:520px}.quote-label{font-weight:600;color:#9b7a00;margin-bottom:2px}.quote-media{display:block;max-width:180px;max-height:120px;margin-top:6px;border-radius:6px}' +
       'a{color:inherit;text-decoration:none}' +
       '</style></head><body><main class="wrap"><header class="head"><h1>' + escapeHtml(title) +
       '</h1><div class="sub">导出时间：' + escapeHtml(new Date().toLocaleString('zh-CN')) +
-      ' · 消息数：' + messages.length + '</div></header>' + rows + '</main></body></html>';
+      ' · 消息数：' + messages.length + '</div>' +
+      (productName ? '<div class="product">商品：' + escapeHtml(productName) + '</div>' : '') +
+      '</header>' + rows + '</main></body></html>';
   }
 
   function renderConversationMarkdown(conversation, messages, mediaByUrl, options) {
     const opts = options || {};
     const fromConversationFile = opts.fromConversationFile !== false;
     const title = conversation && conversation.title ? conversation.title : '聊天记录';
+    const productName = conversation && conversation.productName ? conversation.productName : '';
     let output = '# 聊天记录：' + title + '\n\n';
     output += '> 导出时间：' + new Date().toLocaleString('zh-CN') + '\n\n---\n\n';
+    if (productName) output = '# 聊天记录：' + title + '\n\n> 商品：' + escapeMarkdown(productName) +
+      '\n> 导出时间：' + new Date().toLocaleString('zh-CN') + '\n\n---\n\n';
     (messages || []).forEach(message => {
       if (message.timestamp) output += '### ' + escapeMarkdown(message.timestamp) + '\n\n';
       output += '**' + escapeMarkdown(message.sender || (message.isMe ? '我' : '对方')) + '**：';

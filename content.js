@@ -75,6 +75,76 @@
     return '聊天记录';
   }
 
+  function isVisible(element) {
+    if (!element) return false;
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+      rect.width > 0 && rect.height > 0;
+  }
+
+  function isIgnoredProductText(value) {
+    const text = cleanText(value);
+    if (!text || text.length < 2 || text.length > 160) return true;
+    if (/^(当前宝贝|当前商品|收藏宝贝|咨询过的宝贝|全部|待付款|待发货|已发货|退款中|交易关闭|详情|查看评价|查看钱款|在线)$/i.test(text)) return true;
+    if (/^(?:¥|￥)?[\d,.]+(?:元)?$/.test(text)) return true;
+    if (/^(?:订单号|订单编号|发货时间|发货状态|物流信息|完结时间|订单备注|数据更新至|本店购买|本店累计|本店平均)/.test(text)) return true;
+    return false;
+  }
+
+  function getProductName(root) {
+    if (!isXianyu()) return '';
+    const markers = Array.from(root.querySelectorAll('*')).filter(element =>
+      isVisible(element) && /^(当前宝贝|当前商品)$/.test(cleanText(element.textContent))
+    );
+    if (!markers.length) return '';
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    markers.sort((a, b) => {
+      const aRight = a.getBoundingClientRect().left > viewportWidth * 0.55;
+      const bRight = b.getBoundingClientRect().left > viewportWidth * 0.55;
+      return Number(bRight) - Number(aRight);
+    });
+    const marker = markers[0];
+    const markerRect = marker.getBoundingClientRect();
+    let panel = marker;
+    const candidates = [];
+    for (let level = 0; panel && level < 8; level += 1, panel = panel.parentElement) {
+      const panelRect = panel.getBoundingClientRect();
+      if (panelRect.width < 220 || panelRect.height < 100) continue;
+      const nodes = [panel, ...Array.from(panel.querySelectorAll('*'))];
+      nodes.forEach(node => {
+        if (!isVisible(node)) return;
+        const text = cleanText(node.textContent);
+        if (isIgnoredProductText(text)) return;
+        const rect = node.getBoundingClientRect();
+        const afterMarker = rect.top + rect.height >= markerRect.bottom - 4;
+        const nearby = rect.top <= markerRect.bottom + 280;
+        if (!afterMarker || !nearby) return;
+        const className = String(node.className || '');
+        const titleLike = /(goods|product|commodity|item|title|name|宝贝|商品)/i.test(className);
+        const leaf = node.children.length === 0;
+        const hasImage = Boolean(node.parentElement && node.parentElement.querySelector('img'));
+        const distance = Math.max(0, rect.top - markerRect.bottom);
+        const score = (titleLike ? 70 : 0) + (leaf ? 20 : 0) +
+          (hasImage ? 15 : 0) + (nearby ? 55 : 0) - Math.min(distance, 280) / 12 - text.length / 120;
+        candidates.push({ text, score });
+      });
+      if (candidates.length && level >= 2) break;
+    }
+    candidates.sort((a, b) => b.score - a.score || a.text.length - b.text.length);
+    return candidates[0]?.text || '';
+  }
+
+  async function waitForProductName(timeoutMs) {
+    const started = Date.now();
+    while (Date.now() - started < (timeoutMs || 1200)) {
+      const productName = getProductName(document);
+      if (productName) return productName;
+      await sleep(180);
+    }
+    return getProductName(document);
+  }
+
   function getMessageId(element, index, message) {
     const explicit = [
       element.getAttribute('data-message-id'),
@@ -833,15 +903,17 @@
         }
         if (message.action === 'GET_CURRENT_MESSAGES') {
           const data = currentMessages();
-          sendResponse({ ok: true, platform: isXianyu() ? 'xianyu' : isFiverr() ? 'fiverr' : 'unknown', ...data });
+          sendResponse({ ok: true, platform: isXianyu() ? 'xianyu' : isFiverr() ? 'fiverr' : 'unknown',
+            productName: getProductName(document), ...data });
           return;
         }
         if (message.action === 'PROCESS_CONVERSATION') {
           if (!isXianyu()) throw new Error('批量功能只支持闲鱼网页');
           await openConversation(message.conversation);
+          const productName = await waitForProductName(1400);
           const data = await collectAllMessages(message.jobId, message.conversation.id);
           await sendChunks(message.jobId, message.conversation.id, data.messages);
-          sendResponse({ ok: true, chatTitle: data.chatTitle, messageCount: data.messages.length });
+          sendResponse({ ok: true, chatTitle: data.chatTitle, productName, messageCount: data.messages.length });
           return;
         }
         sendResponse({ ok: false, error: '未知操作' });
