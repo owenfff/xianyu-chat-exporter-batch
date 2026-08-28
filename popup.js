@@ -108,6 +108,7 @@
       $('batchSelectAll').checked = false;
       renderConversations();
     });
+    $('scanAll').addEventListener('change', syncScanLimitControls);
     $('scanConversations').addEventListener('click', scanConversations);
     $('startJob').addEventListener('click', startJob);
     $('pauseJob').addEventListener('click', () => controlJob('PAUSE_JOB'));
@@ -188,19 +189,23 @@
 
   async function scanConversations() {
     const button = $('scanConversations');
-    const limit = readScanLimit();
-    if (!limit) return;
+    const scanAll = $('scanAll').checked;
+    const limit = readScanLimit(scanAll);
+    if (limit === undefined) return;
     button.disabled = true;
     $('scanLimit').disabled = true;
+    $('scanAll').disabled = true;
     button.textContent = '扫描中…';
-    showNotice('正在扫描前 ' + limit + ' 个会话，请保持闲鱼页面打开。');
+    showNotice(scanAll
+      ? '正在扫描全部会话，请保持闲鱼页面打开。'
+      : '正在扫描前 ' + limit + ' 个会话，请保持闲鱼页面打开。');
     try {
-      const response = await sendTab({ action: 'SCAN_CONVERSATIONS', limit });
+      const response = await sendTab({ action: 'SCAN_CONVERSATIONS', limit: scanAll ? null : limit });
       if (!response || response.ok === false) throw new Error(response?.error || '扫描失败');
       conversations = (response.conversations || []).map(item => Object.assign({ selected: true }, item));
       renderConversations();
       showNotice(conversations.length
-        ? '扫描完成，共发现 ' + conversations.length + ' 个会话（上限 ' + limit + ' 个）。'
+        ? '扫描完成，共发现 ' + conversations.length + ' 个会话' + (scanAll ? '。' : '（上限 ' + limit + ' 个）。')
         : '没有发现可导出的会话。');
       showNotification('扫描完成', conversations.length
         ? '已发现 ' + conversations.length + ' 个会话。'
@@ -209,9 +214,14 @@
       showNotice(error.message || '扫描失败', true);
     } finally {
       button.disabled = false;
-      $('scanLimit').disabled = false;
+      $('scanAll').disabled = false;
+      syncScanLimitControls();
       button.textContent = '扫描会话列表';
     }
+  }
+
+  function syncScanLimitControls() {
+    $('scanLimit').disabled = $('scanAll').checked;
   }
 
   function renderConversations() {
@@ -243,13 +253,14 @@
     $('batchSelectAll').checked = conversations.length > 0 && selected === conversations.length;
   }
 
-  function readScanLimit() {
+  function readScanLimit(scanAll) {
+    if (scanAll) return null;
     const input = $('scanLimit');
     const value = Number(input.value);
-    if (!Number.isInteger(value) || value < 1 || value > 2000) {
-      showNotice('扫描数量请输入 1 到 2000 之间的整数。', true);
+    if (!Number.isSafeInteger(value) || value < 1) {
+      showNotice('扫描数量请输入大于 0 的整数，或勾选“全部”。', true);
       input.focus();
-      return 0;
+      return undefined;
     }
     input.value = String(value);
     return value;
