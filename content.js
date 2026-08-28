@@ -531,6 +531,37 @@
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
 
+  function scrollPosition(scroller) {
+    return scroller === document.scrollingElement ? window.scrollY : scroller.scrollTop;
+  }
+
+  function dispatchWheel(scroller, deltaY) {
+    const target = scroller === document.scrollingElement ? document : scroller;
+    if (typeof WheelEvent === 'function') {
+      target.dispatchEvent(new WheelEvent('wheel', {
+        deltaY,
+        deltaMode: 0,
+        bubbles: true,
+        cancelable: true
+      }));
+    }
+  }
+
+  function scrollUpOnePage(scroller) {
+    const viewportHeight = scroller === document.scrollingElement
+      ? (window.innerHeight || 600)
+      : (scroller.clientHeight || 600);
+    const amount = Math.max(160, Math.floor(viewportHeight * 0.72));
+    const current = scrollPosition(scroller);
+    dispatchWheel(scroller, -amount);
+    if (scroller === document.scrollingElement) {
+      window.scrollTo({ top: Math.max(0, current - amount), behavior: 'auto' });
+    } else {
+      scroller.scrollTop = Math.max(0, current - amount);
+    }
+    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }
+
   function waitForMutation(target, timeoutMs) {
     return new Promise(resolve => {
       let finished = false;
@@ -587,30 +618,43 @@
     for (let pass = 0; pass < 300; pass += 1) {
       const before = index.size;
       checkRiskControl();
-      const first = currentMessages();
-      mergeMessages(ordered, index, first.messages, true);
-      scrollToTop(scroller);
-      await sleep(250);
-      await waitForMutation(scroller, 2200);
+      // Move upward in viewport-sized wheel steps. Xianyu loads older records
+      // when the user approaches the top, but a single jump to scrollTop=0 can
+      // leave the first page unloaded.
+      const positionBefore = scrollPosition(scroller);
+      const viewportHeight = scroller === document.scrollingElement
+        ? (window.innerHeight || 600)
+        : (scroller.clientHeight || 600);
+      const mutation = waitForMutation(scroller, positionBefore <= viewportHeight ? 2200 : 700);
+      scrollUpOnePage(scroller);
+      await mutation;
+      await sleep(350);
       checkRiskControl();
-      const second = currentMessages();
-      mergeMessages(ordered, index, second.messages, true);
+      const current = currentMessages();
+      mergeMessages(ordered, index, current.messages, true);
       if (index.size === before) {
         noNewPasses += 1;
       } else {
         noNewPasses = 0;
         if (jobId) await persistMessageSnapshot(jobId, conversationId, ordered);
       }
-      const atTop = scroller === document.scrollingElement
-        ? window.scrollY <= 4
-        : scroller.scrollTop <= 4;
-      const noMore = /(没有更多|暂无更多|已加载全部|没有更多消息)/i.test(scroller.innerText || '');
-      if ((atTop && noNewPasses >= 3) || noMore) break;
+      const atTop = scrollPosition(scroller) <= 4;
+      if (atTop && noNewPasses >= 3) break;
       if (jobId) {
         const response = await chrome.runtime.sendMessage({ action: 'JOB_SHOULD_PAUSE', jobId });
         if (response && response.pause) throw new Error('任务已暂停');
       }
     }
+
+    // Leave the page at the real top and capture one final settled DOM state.
+    const finalMutation = waitForMutation(scroller, 1800);
+    scrollToTop(scroller);
+    await finalMutation;
+    await sleep(600);
+    const finalData = currentMessages();
+    const beforeFinal = index.size;
+    mergeMessages(ordered, index, finalData.messages, true);
+    if (jobId && index.size !== beforeFinal) await persistMessageSnapshot(jobId, conversationId, ordered);
     return {
       chatTitle: getTitle(document),
       messages: ordered.map((message, order) => Object.assign({}, message, { order }))
