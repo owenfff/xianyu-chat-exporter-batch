@@ -197,15 +197,7 @@
   }
 
   function parseXianyu(root) {
-    const elements = Array.from(root.querySelectorAll(SELECTORS.messageItems)).filter(element => {
-      if (element.querySelector('[class*="price"]')) return false;
-      return Boolean(
-        element.querySelector(SELECTORS.messageText) ||
-        element.querySelector(SELECTORS.imageContainer) ||
-        element.querySelector('video') ||
-        element.querySelector('audio')
-      );
-    });
+    const elements = messageElements(root).filter(element => !element.querySelector('[class*="price"]'));
 
     const chatTitle = getTitle(root);
     let myAvatar = '';
@@ -337,6 +329,16 @@
 
   function hasMessageMarker(element) {
     return Boolean(element.querySelector(SELECTORS.messageText + ',' + SELECTORS.imageContainer + ',video,audio'));
+  }
+
+  function messageElements(root) {
+    const candidates = Array.from(root.querySelectorAll(SELECTORS.messageItems)).filter(hasMessageMarker);
+    const candidateSet = new Set(candidates);
+    // `[class*="ant-list-item"]` also matches the list wrapper
+    // `ant-list-items`. Keep only actual message rows so the wrapper is not
+    // parsed as a duplicate/garbled message.
+    return candidates.filter(element => !Array.from(element.querySelectorAll(SELECTORS.messageItems))
+      .some(child => candidateSet.has(child)));
   }
 
   function candidateTitle(element) {
@@ -605,10 +607,10 @@
   }
 
   function findMessageScroller() {
-    const messageElements = Array.from(document.querySelectorAll(SELECTORS.messageItems)).filter(hasMessageMarker);
+    const messageRows = messageElements(document);
     const candidateMap = new Map();
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-    messageElements.forEach(message => {
+    messageRows.forEach(message => {
       let current = message;
       let distance = 0;
       while (current) {
@@ -654,20 +656,48 @@
     return candidates[0]?.element || document.scrollingElement;
   }
 
-  function scrollToTop(scroller) {
+  function isReverseScroller(scroller) {
+    return scroller !== document.scrollingElement &&
+      getComputedStyle(scroller).flexDirection === 'column-reverse';
+  }
+
+  function scrollBounds(scroller) {
     if (scroller === document.scrollingElement) {
-      window.scrollTo({ top: 0, behavior: 'auto' });
+      return {
+        min: 0,
+        max: Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
+      };
+    }
+    const range = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    return isReverseScroller(scroller) ? { min: -range, max: 0 } : { min: 0, max: range };
+  }
+
+  function isAtVisualTop(scroller) {
+    const bounds = scrollBounds(scroller);
+    return scrollPosition(scroller) <= bounds.min + 4;
+  }
+
+  function isNearVisualTop(scroller, viewportHeight) {
+    const bounds = scrollBounds(scroller);
+    return scrollPosition(scroller) <= bounds.min + viewportHeight;
+  }
+
+  function scrollToTop(scroller) {
+    const bounds = scrollBounds(scroller);
+    if (scroller === document.scrollingElement) {
+      window.scrollTo({ top: bounds.min, behavior: 'auto' });
     } else {
-      scroller.scrollTop = 0;
+      scroller.scrollTop = bounds.min;
     }
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
 
   function scrollToBottom(scroller) {
+    const bounds = scrollBounds(scroller);
     if (scroller === document.scrollingElement) {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+      window.scrollTo({ top: bounds.max, behavior: 'auto' });
     } else {
-      scroller.scrollTop = scroller.scrollHeight;
+      scroller.scrollTop = bounds.max;
     }
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
@@ -700,10 +730,12 @@
     for (let index = 0; index < 3; index += 1) {
       const current = scrollPosition(scroller);
       dispatchWheel(scroller, -tick);
+      const bounds = scrollBounds(scroller);
+      const nextTop = Math.max(bounds.min, current - tick);
       if (scroller === document.scrollingElement) {
-        window.scrollTo({ top: Math.max(0, current - tick), behavior: 'auto' });
+        window.scrollTo({ top: nextTop, behavior: 'auto' });
       } else {
-        scroller.scrollTop = Math.max(0, current - tick);
+        scroller.scrollTop = nextTop;
       }
       scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
       await sleep(80);
@@ -718,17 +750,17 @@
 
     // A synthetic wheel event reaches the same React event path as a user's
     // wheel. The one-pixel bounce additionally retriggers top sentinels that
-    // only run when the scroll position changes from/to zero.
+    // only run when the scroll position changes from/to the visual top.
     for (let index = 0; index < 3; index += 1) dispatchWheel(scroller, -nudge);
+    const bounds = scrollBounds(scroller);
     if (scroller === document.scrollingElement) {
-      window.scrollTo({ top: 1, behavior: 'auto' });
+      window.scrollTo({ top: Math.min(bounds.max, bounds.min + 1), behavior: 'auto' });
       scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
-      window.scrollTo({ top: 0, behavior: 'auto' });
+      window.scrollTo({ top: bounds.min, behavior: 'auto' });
     } else {
-      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      scroller.scrollTop = Math.min(1, maxTop);
+      scroller.scrollTop = Math.min(bounds.max, bounds.min + 1);
       scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
-      scroller.scrollTop = 0;
+      scroller.scrollTop = bounds.min;
     }
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
     for (let index = 0; index < 3; index += 1) dispatchWheel(scroller, -nudge);
@@ -802,12 +834,11 @@
     for (let pass = 0; pass < 300; pass += 1) {
       const before = index.size;
       checkRiskControl();
-      // Move upward in viewport-sized wheel steps. Xianyu loads older records
-      // when the user approaches the top, but a single jump to scrollTop=0 can
-      // leave the first page unloaded.
+      // Move upward in small wheel steps. Xianyu loads older records when the
+      // user approaches the visual top; reverse chat lists use negative
+      // scrollTop values, so zero is the newest-message end, not the top.
       const beforeViewport = currentMessages();
       const beforeViewportSignature = visibleMessageSignature(beforeViewport);
-      const positionBefore = scrollPosition(scroller);
       const heightBefore = scroller.scrollHeight;
       const viewportHeight = scroller === document.scrollingElement
         ? (window.innerHeight || 600)
@@ -817,7 +848,7 @@
         scroller,
         beforeViewportSignature,
         heightBefore,
-        positionBefore <= viewportHeight ? 2600 : 1200
+        isNearVisualTop(scroller, viewportHeight) ? 2600 : 1200
       );
       await sleep(300);
       mergeMessages(ordered, index, current.messages, true);
@@ -828,12 +859,12 @@
         topNoNewPasses = 0;
         if (jobId) await persistMessageSnapshot(jobId, conversationId, ordered);
       }
-      const atTop = scrollPosition(scroller) <= 4;
+      const atTop = isAtVisualTop(scroller);
       if (!atTop) topNoNewPasses = 0;
 
       // On Xianyu the first page is sometimes fetched only after the chat
-      // viewport has actually reached zero. A programmatic jump can arrive at
-      // zero before that request starts, so probe the top with a small bounce
+      // viewport has actually reached its visual top. A programmatic jump can
+      // arrive there before that request starts, so probe the top with a bounce
       // and wait for the virtual list to settle. Do not finish on the first
       // empty read at the top.
       if (atTop && noNewPasses >= 1) {
