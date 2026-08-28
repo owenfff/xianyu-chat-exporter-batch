@@ -87,6 +87,7 @@
     const text = cleanText(value);
     if (!text || text.length < 2 || text.length > 160) return true;
     if (/^(当前宝贝|当前商品|收藏宝贝|咨询过的宝贝|全部|待付款|待发货|已发货|退款中|交易关闭|详情|查看评价|查看钱款|在线)$/i.test(text)) return true;
+    if (/^(暂无相关信息|暂无商品信息|暂无宝贝信息|未找到相关商品|暂无数据)$/i.test(text)) return true;
     if (/^(?:¥|￥)?[\d,.]+(?:元)?$/.test(text)) return true;
     if (/^(?:订单号|订单编号|发货时间|发货状态|物流信息|完结时间|订单备注|数据更新至|本店购买|本店累计|本店平均)/.test(text)) return true;
     return false;
@@ -104,6 +105,31 @@
       const bRight = b.getBoundingClientRect().left > viewportWidth * 0.55;
       return Number(bRight) - Number(aRight);
     });
+
+    // The seller page links the “当前宝贝” tab to a dedicated tab panel.
+    // Read the item-name node in that panel first; scanning the whole right
+    // sidebar can otherwise select “暂无相关信息” from the buyer-info card.
+    const documentRoot = root.ownerDocument || root;
+    const productPanels = [];
+    markers.forEach(marker => {
+      const tab = marker.matches('[role="tab"]') ? marker : marker.querySelector('[role="tab"]');
+      const panelId = tab && tab.getAttribute('aria-controls');
+      const panel = panelId && documentRoot.getElementById ? documentRoot.getElementById(panelId) : null;
+      if (panel && !productPanels.includes(panel)) productPanels.push(panel);
+    });
+    const directTitles = productPanels.flatMap(panel => Array.from(panel.querySelectorAll('*')).filter(element => {
+      if (!isVisible(element)) return false;
+      const className = String(element.className || '');
+      const titleLike = /(item[-_]?name|product[-_]?name|goods[-_]?name|commodity[-_]?name)/i.test(className);
+      return titleLike && !isIgnoredProductText(element.textContent);
+    }));
+    directTitles.sort((a, b) => {
+      const aLeaf = a.children.length === 0;
+      const bLeaf = b.children.length === 0;
+      return Number(bLeaf) - Number(aLeaf) || cleanText(a.textContent).length - cleanText(b.textContent).length;
+    });
+    if (directTitles.length) return cleanText(directTitles[0].textContent);
+
     const marker = markers[0];
     const markerRect = marker.getBoundingClientRect();
     let panel = marker;
@@ -941,8 +967,10 @@
         if (message.action === 'PROCESS_CONVERSATION') {
           if (!isXianyu()) throw new Error('批量功能只支持闲鱼网页');
           await openConversation(message.conversation);
-          const productName = await waitForProductName(1400);
           const data = await collectAllMessages(message.jobId, message.conversation.id);
+          // The product card is loaded independently from the chat list and may
+          // appear after the conversation itself has finished rendering.
+          const productName = await waitForProductName(2200);
           await sendChunks(message.jobId, message.conversation.id, data.messages);
           sendResponse({ ok: true, chatTitle: data.chatTitle, productName, messageCount: data.messages.length });
           return;
