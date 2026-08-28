@@ -380,7 +380,11 @@
     return conversationNodes(container).map(node => conversationIdentity(node, 0).key).join('|');
   }
 
-  async function scanConversations() {
+  async function scanConversations(limit) {
+    const requestedLimit = Number.parseInt(limit, 10);
+    const maxRecords = Number.isInteger(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 500)
+      : 20;
     const best = findConversationContainer();
     const container = best.element;
     const scrollTarget = (container === document.body || container === document.documentElement)
@@ -395,9 +399,11 @@
     for (let pass = 0; pass < 160; pass += 1) {
       const nodes = conversationNodes(container);
       nodes.forEach((node, index) => {
+        if (records.size >= maxRecords) return;
         const record = conversationIdentity(node, index);
         if (!records.has(record.key)) records.set(record.key, record);
       });
+      if (records.size >= maxRecords) break;
       const before = scrollTarget.scrollTop;
       const beforeHeight = scrollTarget.scrollHeight;
       const beforeSignature = visibleConversationSignature(container);
@@ -774,7 +780,7 @@
       try {
         if (message.action === 'SCAN_CONVERSATIONS') {
           if (!isXianyu()) throw new Error('批量功能只支持闲鱼网页');
-          sendResponse({ ok: true, conversations: await scanConversations() });
+          sendResponse({ ok: true, conversations: await scanConversations(message.limit) });
           return;
         }
         if (message.action === 'GET_CURRENT_MESSAGES') {

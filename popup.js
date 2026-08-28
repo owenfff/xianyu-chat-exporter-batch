@@ -171,21 +171,25 @@
 
   async function scanConversations() {
     const button = $('scanConversations');
+    const limit = readScanLimit();
+    if (!limit) return;
     button.disabled = true;
+    $('scanLimit').disabled = true;
     button.textContent = '扫描中…';
-    showNotice('正在扫描会话列表，请保持闲鱼页面打开。');
+    showNotice('正在扫描前 ' + limit + ' 个会话，请保持闲鱼页面打开。');
     try {
-      const response = await sendTab({ action: 'SCAN_CONVERSATIONS' });
+      const response = await sendTab({ action: 'SCAN_CONVERSATIONS', limit });
       if (!response || response.ok === false) throw new Error(response?.error || '扫描失败');
       conversations = (response.conversations || []).map(item => Object.assign({ selected: true }, item));
       renderConversations();
       showNotice(conversations.length
-        ? '已自动滚动扫描完成，共发现 ' + conversations.length + ' 个会话。'
+        ? '扫描完成，共发现 ' + conversations.length + ' 个会话（上限 ' + limit + ' 个）。'
         : '没有发现可导出的会话。');
     } catch (error) {
       showNotice(error.message || '扫描失败', true);
     } finally {
       button.disabled = false;
+      $('scanLimit').disabled = false;
       button.textContent = '扫描会话列表';
     }
   }
@@ -215,6 +219,18 @@
     const selected = conversations.filter(conversation => conversation.selected).length;
     $('conversationStatus').textContent = conversations.length ? '已选 ' + selected + ' / ' + conversations.length + ' 个' : '尚未扫描';
     $('batchSelectAll').checked = conversations.length > 0 && selected === conversations.length;
+  }
+
+  function readScanLimit() {
+    const input = $('scanLimit');
+    const value = Number(input.value);
+    if (!Number.isInteger(value) || value < 1 || value > 500) {
+      showNotice('扫描数量请输入 1 到 500 之间的整数。', true);
+      input.focus();
+      return 0;
+    }
+    input.value = String(value);
+    return value;
   }
 
   async function startJob() {
