@@ -535,31 +535,51 @@
   }
 
   function findMessageScroller() {
-    const message = Array.from(document.querySelectorAll(SELECTORS.messageItems)).find(hasMessageMarker);
-    let current = message;
-    const candidates = [];
-    let distance = 0;
+    const messageElements = Array.from(document.querySelectorAll(SELECTORS.messageItems)).filter(hasMessageMarker);
+    const candidateMap = new Map();
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-    while (current) {
-      if (isScrollable(current)) {
+    messageElements.forEach(message => {
+      let current = message;
+      let distance = 0;
+      while (current) {
         const style = getComputedStyle(current);
-        const rect = current.getBoundingClientRect();
-        const messageCount = current.querySelectorAll(SELECTORS.messageItems).length;
         const nativeOverflow = /(auto|scroll|overlay)/.test(style.overflowY);
-        const centralPanel = viewportWidth > 0 && rect.left > viewportWidth * 0.15 &&
-          rect.right < viewportWidth * 0.95;
-        candidates.push({
-          element: current,
-          score: Math.min(messageCount, 20) * 4 +
-            (nativeOverflow ? 45 : 0) +
-            (centralPanel ? 18 : 0) +
-            Math.max(0, 24 - distance * 8),
-          distance
-        });
+        const hasRange = current.scrollHeight > current.clientHeight + 4;
+        if (hasRange || nativeOverflow) {
+          let entry = candidateMap.get(current);
+          if (!entry) {
+            entry = { element: current, messages: new Set(), distance: Infinity };
+            candidateMap.set(current, entry);
+          }
+          entry.messages.add(message);
+          entry.distance = Math.min(entry.distance, distance);
+        }
+        current = current.parentElement;
+        distance += 1;
       }
-      current = current.parentElement;
-      distance += 1;
-    }
+    });
+
+    const candidates = Array.from(candidateMap.values()).map(entry => {
+      const element = entry.element;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const nativeOverflow = /(auto|scroll|overlay)/.test(style.overflowY);
+      const hasRange = element.scrollHeight > element.clientHeight + 4;
+      const fullWidth = viewportWidth > 0 && rect.width > viewportWidth * 0.9;
+      // Xianyu places the chat viewport between the left conversation list
+      // and the right order panel. This helps reject the page scroller when
+      // both the page and the embedded chat area can scroll.
+      const centralPanel = viewportWidth > 0 && rect.left < viewportWidth * 0.72 &&
+        rect.right > viewportWidth * 0.45 && !fullWidth;
+      const score = entry.messages.size * 100 +
+        (hasRange ? 80 : 0) +
+        (nativeOverflow ? 40 : 0) +
+        (centralPanel ? 80 : 0) +
+        (fullWidth ? -100 : 0) +
+        (entry.messages.size > 1 ? 30 : 0) +
+        Math.max(0, 50 - entry.distance * 8);
+      return Object.assign(entry, { score });
+    });
     candidates.sort((a, b) => b.score - a.score || a.distance - b.distance);
     return candidates[0]?.element || document.scrollingElement;
   }
