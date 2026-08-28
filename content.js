@@ -243,8 +243,9 @@
   function isScrollable(element) {
     if (!element || element === document.body || element === document.documentElement) return false;
     const style = getComputedStyle(element);
-    return element.scrollHeight > element.clientHeight + 20 &&
-      /(auto|scroll|overlay)/.test(style.overflowY);
+    return element.clientHeight > 100 &&
+      element.scrollHeight > element.clientHeight + 20 &&
+      /(auto|scroll|overlay|hidden)/.test(style.overflowY);
   }
 
   function allScrollableElements(root) {
@@ -299,7 +300,8 @@
       const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
       const looksLikeLeftSidebar = viewportWidth > 0 && rect.left < viewportWidth * 0.45 &&
         rect.width < viewportWidth * 0.55 && rect.height > 160;
-      const score = unique.length * 10 + (isScrollable(container) ? 20 : 0) +
+      const hasScrollRange = container.clientHeight > 100 && container.scrollHeight > container.clientHeight + 20;
+      const score = unique.length * 10 + (hasScrollRange ? 35 : 0) +
         (looksLikeLeftSidebar ? 60 : 0) -
         (container.querySelectorAll(SELECTORS.messageItems).length * 2);
       if (score > best.score) best = { element: container, score, candidates: unique };
