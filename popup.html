@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root { color-scheme: light; --yellow:#ffc400; --ink:#202124; --muted:#73777f; --line:#e8e9ec; --panel:#fafafa; }
+    * { box-sizing:border-box; }
+    body { width:500px; max-height:680px; margin:0; color:var(--ink); font:13px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+    button { border:0; border-radius:8px; cursor:pointer; font:inherit; }
+    button:disabled { cursor:not-allowed; opacity:.45; }
+    .header { display:flex; align-items:center; gap:9px; padding:14px 18px; background:linear-gradient(135deg,#ffe45b,#ffbd00); font-size:15px; font-weight:700; }
+    .header small { margin-left:auto; font-size:11px; font-weight:500; opacity:.65; }
+    .notice { margin:10px 14px 0; padding:9px 11px; border:1px solid #f1dea0; border-radius:8px; background:#fff9df; color:#795d00; font-size:12px; }
+    .tabs { display:flex; gap:5px; padding:10px 14px 0; border-bottom:1px solid var(--line); }
+    .tab { padding:8px 13px; border-radius:8px 8px 0 0; color:var(--muted); background:transparent; }
+    .tab.active { color:var(--ink); background:var(--panel); font-weight:700; }
+    .toolbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+    .toolbar label { display:flex; align-items:center; gap:5px; }
+    input[type=checkbox] { width:16px; height:16px; accent-color:#ffb800; }
+    .status { margin-left:auto; color:var(--muted); font-size:12px; }
+    .scroll { max-height:350px; overflow:auto; }
+    .message-item,.conversation-item { display:flex; gap:9px; align-items:flex-start; padding:9px 14px; border-bottom:1px solid #f0f0f0; }
+    .message-item:hover,.conversation-item:hover { background:#fffdf2; }
+    .message-item input,.conversation-item input { flex:0 0 auto; margin-top:3px; }
+    .message-main,.conversation-main { min-width:0; flex:1; }
+    .message-meta,.conversation-meta { display:flex; gap:8px; align-items:center; margin-bottom:3px; }
+    .sender,.conversation-title { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .mine { color:#a77c00; }
+    .time,.conversation-preview { color:#92969d; font-size:11px; }
+    .message-text,.conversation-preview { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#666; }
+    .conversation-preview { max-width:390px; }
+    .empty { padding:38px 20px; text-align:center; color:var(--muted); }
+    .empty-icon { margin-bottom:7px; font-size:32px; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; padding:12px 14px; border-top:1px solid var(--line); background:#fff; }
+    .btn { padding:9px 13px; background:#f0f1f3; color:#4d5157; }
+    .btn.primary { background:linear-gradient(135deg,#ffe45b,#ffbd00); color:#2d2a20; font-weight:700; }
+    .btn.danger { background:#fff0f0; color:#b42318; }
+    .progress-wrap { padding:11px 14px 0; }
+    .progress-label { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
+    progress { width:100%; height:8px; margin-top:6px; accent-color:#ffb800; }
+    .job-note { margin:8px 14px 0; padding:8px 10px; border-radius:7px; background:#f7f7f8; color:var(--muted); font-size:12px; }
+    .hidden { display:none !important; }
+    .loading { padding:42px 20px; text-align:center; color:var(--muted); }
+    .spinner { width:23px; height:23px; margin:0 auto 10px; border:3px solid #eee; border-top-color:#ffb800; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header class="header"><span>💬</span><span id="headerTitle">闲鱼聊天记录批量导出</span><small>v1.2.0</small></header>
+  <div id="notice" class="notice hidden"></div>
+  <div id="loading" class="loading"><div class="spinner"></div><div>正在连接当前网页…</div></div>
+  <div id="unsupported" class="empty hidden"><div class="empty-icon">🔍</div><div>请在闲鱼、Goofish 或 Fiverr 页面使用此插件</div></div>
+
+  <div id="app" class="hidden">
+    <nav class="tabs">
+      <button id="singleTab" class="tab active" type="button">当前聊天</button>
+      <button id="batchTab" class="tab" type="button">批量导出</button>
+    </nav>
+
+    <section id="singleView">
+      <div class="toolbar">
+        <label><input id="selectAll" type="checkbox" checked>全选</label>
+        <label><input id="debugMode" type="checkbox">调试 JSON</label>
+        <span id="singleStatus" class="status">已选择 0 条</span>
+      </div>
+      <div id="messageList" class="scroll"></div>
+      <div id="singleEmpty" class="empty hidden"><div class="empty-icon">💬</div><div>当前页面未找到已加载的聊天消息</div></div>
+      <div class="controls">
+        <button id="exportHtml" class="btn primary" type="button">导出 HTML</button>
+        <button id="exportMd" class="btn" type="button">导出 Markdown</button>
+      </div>
+    </section>
+
+    <section id="batchView" class="hidden">
+      <div class="toolbar">
+        <label><input id="batchSelectAll" type="checkbox" checked>全选会话</label>
+        <span id="conversationStatus" class="status">尚未扫描</span>
+      </div>
+      <div class="controls">
+        <button id="scanConversations" class="btn primary" type="button">扫描会话列表</button>
+        <button id="clearSelection" class="btn" type="button">清空选择</button>
+      </div>
+      <div id="conversationList" class="scroll"></div>
+      <div id="conversationEmpty" class="empty hidden"><div class="empty-icon">📭</div><div>没有发现可导出的会话</div></div>
+      <div class="progress-wrap">
+        <div class="progress-label"><span id="jobStatus">没有运行中的任务</span><span id="jobCount">0 / 0</span></div>
+        <progress id="jobProgress" value="0" max="1"></progress>
+      </div>
+      <div id="jobNote" class="job-note hidden"></div>
+      <div class="controls">
+        <button id="startJob" class="btn primary" type="button">开始批量导出</button>
+        <button id="pauseJob" class="btn" type="button" disabled>暂停</button>
+        <button id="resumeJob" class="btn" type="button" disabled>继续</button>
+        <button id="stopJob" class="btn danger" type="button" disabled>停止</button>
+        <button id="exportJob" class="btn" type="button" disabled>导出 ZIP</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="storage.js"></script>
+  <script src="exporter.js"></script>
+  <script src="zip.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

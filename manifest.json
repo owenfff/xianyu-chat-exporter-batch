@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "闲鱼聊天记录批量导出",
+  "version": "1.2.0",
+  "description": "批量导出闲鱼聊天记录，支持单聊、断点恢复和本地媒体归档",
+  "permissions": ["activeTab", "scripting", "downloads", "storage"],
+  "host_permissions": [
+    "*://*.xianyu.com/*",
+    "*://*.goofish.com/*",
+    "*://*.fiverr.com/*",
+    "*://*.alicdn.com/*",
+    "*://*.tbcdn.cn/*",
+    "*://*.taobao.com/*",
+    "*://*.tmall.com/*"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.xianyu.com/*", "*://*.goofish.com/*", "*://*.fiverr.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.svg",
+      "48": "icon48.svg",
+      "128": "icon128.svg"
+    }
+  },
+  "icons": {
+    "16": "icon16.svg",
+    "48": "icon48.svg",
+    "128": "icon128.svg"
+  }
+}
