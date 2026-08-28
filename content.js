@@ -302,7 +302,7 @@
     return best;
   }
 
-  function conversationIdentity(element, index) {
+  function getConversationAttribute(element) {
     const attrs = [
       'data-conversation-id',
       'data-session-id',
@@ -310,12 +310,43 @@
       'data-user-id',
       'data-id'
     ];
-    const attribute = attrs.map(name => element.getAttribute(name)).find(Boolean);
+    const candidates = [
+      element,
+      element.closest('li'),
+      element.closest('a'),
+      element.closest('button'),
+      element.closest('[role="button"]')
+    ].filter((node, index, all) => node && all.indexOf(node) === index);
+    for (const current of candidates) {
+      const attribute = attrs.map(name => current.getAttribute(name)).find(Boolean);
+      if (attribute) return attribute;
+    }
+    return '';
+  }
+
+  function getConversationLink(element) {
     const link = element.closest('a')?.href || element.querySelector('a')?.href;
+    if (!link) return '';
+    const absolute = absoluteUrl(link);
+    if (!absolute || absolute === location.href) return '';
+    // Ignore generic links shared by every row. Keep links that carry a route or
+    // query parameter that can identify one conversation.
+    if (!/(?:chat|conversation|session|message|im|user)/i.test(absolute) &&
+      !/[?&](?:id|uid|userId|sessionId|conversationId)=/i.test(absolute)) return '';
+    return absolute;
+  }
+
+  function conversationIdentity(element, index) {
+    const attribute = getConversationAttribute(element);
+    const link = getConversationLink(element);
     const title = candidateTitle(element) || '未命名会话';
     const avatar = usableUrl(element.querySelector('img')?.getAttribute('src'));
     const preview = cleanText(element.innerText || element.textContent).slice(0, 180);
-    const key = attribute ? 'id:' + attribute : link ? 'url:' + absoluteUrl(link) : 'fp:' + hash(title + '\u001f' + avatar + '\u001f' + preview);
+    // Preview text is deliberately excluded from the fallback identity. On a
+    // virtualized list the same row can be recycled with different text while
+    // scrolling, which previously created duplicate conversations in the ZIP.
+    const stableFallback = [cleanText(title).toLocaleLowerCase(), mediaIdentity(avatar).toLocaleLowerCase()].join('\u001f');
+    const key = attribute ? 'id:' + attribute : link ? 'url:' + link : 'fp:' + hash(stableFallback);
     return {
       id: key,
       key,
@@ -335,6 +366,9 @@
     const originalTop = scrollTarget.scrollTop || 0;
     const records = new Map();
     let noNewAtEnd = 0;
+    scrollTarget.scrollTop = 0;
+    scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+    await sleep(350);
     for (let pass = 0; pass < 80; pass += 1) {
       const nodes = Array.from(container.querySelectorAll(
         '[role="button"],li,[class*="conversation"],[class*="session"],[class*="contact"],[class*="chat"],[class*="list-item"],[class*="user-item"]'
@@ -354,19 +388,58 @@
       if (noNewAtEnd >= 2) break;
     }
     scrollTarget.scrollTop = originalTop;
+    scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
     return Array.from(records.values()).map((record, index) => Object.assign(record, { index }));
   }
 
-  function findConversationElement(conversation) {
-    const best = findConversationContainer();
-    const nodes = Array.from(best.element.querySelectorAll(
+  function conversationNodes(container) {
+    return Array.from(container.querySelectorAll(
       '[role="button"],li,[class*="conversation"],[class*="session"],[class*="contact"],[class*="chat"],[class*="list-item"],[class*="user-item"]'
     )).filter(isConversationCandidate);
+  }
+
+  function matchConversationNode(nodes, conversation) {
     return nodes.find(node => {
       const record = conversationIdentity(node, 0);
       return record.key === conversation.key ||
         (record.title === conversation.title && record.avatar === conversation.avatar);
     }) || nodes.find(node => candidateTitle(node) === conversation.title);
+  }
+
+  async function findConversationElement(conversation) {
+    const best = findConversationContainer();
+    const container = best.element;
+    const scrollTarget = (container === document.body || container === document.documentElement)
+      ? document.scrollingElement
+      : container;
+    const originalTop = scrollTarget.scrollTop || 0;
+
+    // A virtualized conversation list only keeps visible rows in the DOM. Scan
+    // from the current position first, then from the top so the next item can be
+    // found regardless of whether it is above or below the previous item.
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      if (cycle === 1) {
+        scrollTarget.scrollTop = 0;
+        scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+        await sleep(350);
+      }
+      let lastTop = -1;
+      for (let pass = 0; pass < 80; pass += 1) {
+        const match = matchConversationNode(conversationNodes(container), conversation);
+        if (match) return match;
+        const before = scrollTarget.scrollTop;
+        const step = Math.max(160, Math.floor(scrollTarget.clientHeight * 0.8));
+        scrollTarget.scrollTop = Math.min(scrollTarget.scrollHeight, before + step);
+        scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+        await sleep(350);
+        const atEnd = scrollTarget.scrollTop + scrollTarget.clientHeight >= scrollTarget.scrollHeight - 8;
+        if (atEnd && lastTop === scrollTarget.scrollTop) break;
+        lastTop = scrollTarget.scrollTop;
+      }
+    }
+    scrollTarget.scrollTop = originalTop;
+    scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return null;
   }
 
   function messageSignature(data) {
@@ -390,7 +463,7 @@
   }
 
   async function openConversation(conversation) {
-    const element = findConversationElement(conversation);
+    const element = await findConversationElement(conversation);
     if (!element) throw new Error('找不到会话：' + conversation.title);
     const previous = currentMessages();
     const previousTitle = previous.chatTitle;
@@ -416,6 +489,24 @@
       return bCount - aCount;
     });
     return candidates[0] || document.scrollingElement;
+  }
+
+  function scrollToTop(scroller) {
+    if (scroller === document.scrollingElement) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    } else {
+      scroller.scrollTop = 0;
+    }
+    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }
+
+  function scrollToBottom(scroller) {
+    if (scroller === document.scrollingElement) {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+    } else {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
 
   function waitForMutation(target, timeoutMs) {
@@ -458,27 +549,36 @@
     else ordered.push(...fresh);
   }
 
-  async function collectAllMessages(jobId) {
+  async function collectAllMessages(jobId, conversationId) {
     const scroller = findMessageScroller();
     const ordered = [];
     const index = new Map();
     let noNewPasses = 0;
+
+    // Capture the newest viewport first. This prevents a conversation that was
+    // previously left halfway up the list from losing its newest messages.
+    scrollToBottom(scroller);
+    await sleep(500);
+    const newest = currentMessages();
+    mergeMessages(ordered, index, newest.messages, false);
+
     for (let pass = 0; pass < 300; pass += 1) {
       const before = index.size;
       checkRiskControl();
       const first = currentMessages();
-      mergeMessages(ordered, index, first.messages, pass > 0);
-      if (scroller === document.scrollingElement) window.scrollTo({ top: 0, behavior: 'auto' });
-      else {
-        scroller.scrollTop = 0;
-        scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
-      }
-      await waitForMutation(scroller, 1200);
+      mergeMessages(ordered, index, first.messages, true);
+      scrollToTop(scroller);
+      await sleep(250);
+      await waitForMutation(scroller, 2200);
       checkRiskControl();
       const second = currentMessages();
       mergeMessages(ordered, index, second.messages, true);
-      if (index.size === before) noNewPasses += 1;
-      else noNewPasses = 0;
+      if (index.size === before) {
+        noNewPasses += 1;
+      } else {
+        noNewPasses = 0;
+        if (jobId) await persistMessageSnapshot(jobId, conversationId, ordered);
+      }
       const atTop = scroller === document.scrollingElement
         ? window.scrollY <= 4
         : scroller.scrollTop <= 4;
@@ -493,6 +593,11 @@
       chatTitle: getTitle(document),
       messages: ordered.map((message, order) => Object.assign({}, message, { order }))
     };
+  }
+
+  async function persistMessageSnapshot(jobId, conversationId, ordered) {
+    if (!jobId || !ordered.length) return;
+    await sendChunks(jobId, conversationId, ordered.map((message, order) => Object.assign({}, message, { order })));
   }
 
   async function sendChunks(jobId, conversationId, messages) {
@@ -525,7 +630,7 @@
         if (message.action === 'PROCESS_CONVERSATION') {
           if (!isXianyu()) throw new Error('批量功能只支持闲鱼网页');
           await openConversation(message.conversation);
-          const data = await collectAllMessages(message.jobId);
+          const data = await collectAllMessages(message.jobId, message.conversation.id);
           await sendChunks(message.jobId, message.conversation.id, data.messages);
           sendResponse({ ok: true, chatTitle: data.chatTitle, messageCount: data.messages.length });
           return;

@@ -210,6 +210,7 @@ async function runJob(jobId) {
       for (const conversation of job.conversations) {
         if (conversation.status === 'completed') continue;
         if (!(await waitUntilRunnable(jobId))) break;
+        await updateJob(jobId, { status: 'running', currentConversationId: conversation.id });
         await updateConversation(jobId, conversation.id, item => {
           item.status = 'running';
           item.error = '';
@@ -283,6 +284,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: '已有批量任务正在进行，请先暂停或停止' });
           return;
         }
+        const selectedConversations = [];
+        const selectedIds = new Set();
+        (message.conversations || []).forEach(item => {
+          if (!item || !item.id || selectedIds.has(item.id)) return;
+          selectedIds.add(item.id);
+          selectedConversations.push(item);
+        });
         const job = {
           jobId: 'job-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
           createdAt: new Date().toISOString(),
@@ -291,7 +299,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabId: message.tabId,
           currentConversationId: '',
           pauseReason: '',
-          conversations: (message.conversations || []).map(item => Object.assign({}, item, {
+          conversations: selectedConversations.map(item => Object.assign({}, item, {
             status: 'pending',
             messageCount: 0,
             mediaCount: 0,
