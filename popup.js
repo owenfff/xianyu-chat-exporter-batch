@@ -179,7 +179,9 @@
       if (!response || response.ok === false) throw new Error(response?.error || '扫描失败');
       conversations = (response.conversations || []).map(item => Object.assign({ selected: true }, item));
       renderConversations();
-      showNotice(conversations.length ? '已发现 ' + conversations.length + ' 个会话。' : '没有发现可导出的会话。');
+      showNotice(conversations.length
+        ? '已自动滚动扫描完成，共发现 ' + conversations.length + ' 个会话。'
+        : '没有发现可导出的会话。');
     } catch (error) {
       showNotice(error.message || '扫描失败', true);
     } finally {

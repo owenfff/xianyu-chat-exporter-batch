@@ -295,7 +295,12 @@
         seen.add(key);
         unique.push(node);
       });
-      const score = unique.length * 10 + (isScrollable(container) ? 20 : 0) -
+      const rect = container.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+      const looksLikeLeftSidebar = viewportWidth > 0 && rect.left < viewportWidth * 0.45 &&
+        rect.width < viewportWidth * 0.55 && rect.height > 160;
+      const score = unique.length * 10 + (isScrollable(container) ? 20 : 0) +
+        (looksLikeLeftSidebar ? 60 : 0) -
         (container.querySelectorAll(SELECTORS.messageItems).length * 2);
       if (score > best.score) best = { element: container, score, candidates: unique };
     });
@@ -357,6 +362,10 @@
     };
   }
 
+  function visibleConversationSignature(container) {
+    return conversationNodes(container).map(node => conversationIdentity(node, 0).key).join('|');
+  }
+
   async function scanConversations() {
     const best = findConversationContainer();
     const container = best.element;
@@ -368,24 +377,28 @@
     let noNewAtEnd = 0;
     scrollTarget.scrollTop = 0;
     scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
-    await sleep(350);
-    for (let pass = 0; pass < 80; pass += 1) {
-      const nodes = Array.from(container.querySelectorAll(
-        '[role="button"],li,[class*="conversation"],[class*="session"],[class*="contact"],[class*="chat"],[class*="list-item"],[class*="user-item"]'
-      )).filter(isConversationCandidate);
+    await sleep(700);
+    for (let pass = 0; pass < 160; pass += 1) {
+      const nodes = conversationNodes(container);
       nodes.forEach((node, index) => {
         const record = conversationIdentity(node, index);
         if (!records.has(record.key)) records.set(record.key, record);
       });
       const before = scrollTarget.scrollTop;
+      const beforeHeight = scrollTarget.scrollHeight;
+      const beforeSignature = visibleConversationSignature(container);
       const step = Math.max(160, Math.floor(scrollTarget.clientHeight * 0.8));
       scrollTarget.scrollTop = Math.min(scrollTarget.scrollHeight, scrollTarget.scrollTop + step);
       scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
-      await sleep(350);
+      // Xianyu may request the next page only after the list reaches the
+      // bottom. Give the DOM and the network-backed virtual list time to grow.
+      await sleep(900);
+      const afterSignature = visibleConversationSignature(container);
       const atEnd = scrollTarget.scrollTop + scrollTarget.clientHeight >= scrollTarget.scrollHeight - 8;
-      if (atEnd && before === scrollTarget.scrollTop) noNewAtEnd += 1;
+      const listChanged = beforeHeight !== scrollTarget.scrollHeight || beforeSignature !== afterSignature;
+      if (atEnd && before === scrollTarget.scrollTop && !listChanged) noNewAtEnd += 1;
       else noNewAtEnd = 0;
-      if (noNewAtEnd >= 2) break;
+      if (noNewAtEnd >= 3) break;
     }
     scrollTarget.scrollTop = originalTop;
     scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
