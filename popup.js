@@ -246,8 +246,8 @@
   function readScanLimit() {
     const input = $('scanLimit');
     const value = Number(input.value);
-    if (!Number.isInteger(value) || value < 1 || value > 500) {
-      showNotice('扫描数量请输入 1 到 500 之间的整数。', true);
+    if (!Number.isInteger(value) || value < 1 || value > 2000) {
+      showNotice('扫描数量请输入 1 到 2000 之间的整数。', true);
       input.focus();
       return 0;
     }

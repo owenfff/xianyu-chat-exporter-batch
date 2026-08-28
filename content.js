@@ -481,7 +481,7 @@
   async function scanConversations(limit) {
     const requestedLimit = Number.parseInt(limit, 10);
     const maxRecords = Number.isInteger(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, 500)
+      ? Math.min(requestedLimit, 2000)
       : 20;
     const best = findConversationContainer();
     const container = best.element;
@@ -494,7 +494,7 @@
     scrollTarget.scrollTop = 0;
     scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
     await sleep(700);
-    for (let pass = 0; pass < 160; pass += 1) {
+    for (let pass = 0; pass < 800; pass += 1) {
       const nodes = conversationNodes(container);
       nodes.forEach((node, index) => {
         if (records.size >= maxRecords) return;

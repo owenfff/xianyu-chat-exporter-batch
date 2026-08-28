@@ -30,7 +30,7 @@ A local Chrome extension for organizing and saving Xianyu chat history. It suppo
 
 1. Open [Xianyu Web](https://www.goofish.com/) and sign in.
 2. Click the extension icon in the browser toolbar.
-3. Open the **Batch export** tab, enter the scan limit, and click **Scan conversations**. The default is 20 conversations; valid values are 1–500.
+3. Open the **Batch export** tab, enter the scan limit, and click **Scan conversations**. The default is 20 conversations; valid values are 1–2000. Enter 2000 to scan up to 2000 conversations currently available in the page.
 4. Adjust the selection if needed. New scans are selected by default.
 5. Click **Start batch export**. Conversations are handled sequentially.
 6. Click **Export ZIP** when the task is complete.
