@@ -97,14 +97,24 @@
   }
 
   function getTimestamp(element) {
-    let current = element.closest('[style*="position: relative"]');
-    current = current ? current.previousElementSibling : element.previousElementSibling;
+    const directCandidates = [
+      element.querySelector('time, [class*="timestamp"], [class*="time"], [class*="date"]'),
+      element.closest('[style*="position: relative"]')?.previousElementSibling,
+      element.previousElementSibling
+    ].filter(Boolean);
+    const datePattern = /\b(?:20\d{2}[\/-]\d{1,2}[\/-]\d{1,2}|(?:0?[1-9]|1[0-2])[\/-](?:0?[1-9]|[12]\d|3[01]))(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/;
     let guard = 0;
+    let current = directCandidates[0];
     while (current && guard < 20) {
       const text = cleanText(current.textContent);
-      if (text && /\d{1,2}-\d{1,2}/.test(text)) return text;
+      const match = text.match(datePattern);
+      if (match) return match[0];
       current = current.previousElementSibling;
       guard += 1;
+    }
+    for (const candidate of directCandidates.slice(1)) {
+      const match = cleanText(candidate.textContent).match(datePattern);
+      if (match) return match[0];
     }
     return '';
   }
@@ -146,6 +156,7 @@
       const textNode = element.querySelector(SELECTORS.messageText + ' > span') ||
         element.querySelector(SELECTORS.messageText);
       let text = cleanText(textNode && textNode.textContent);
+      const timestamp = getTimestamp(element);
       const imageUrl = getImageUrl(element);
       const video = element.querySelector('video');
       const videoUrl = usableUrl(video && (video.currentSrc || video.getAttribute('src')));
@@ -180,7 +191,7 @@
         key: getMessageId(element, index, {
           sender: isMe ? '我' : chatTitle,
           isMe,
-          timestamp: getTimestamp(element),
+          timestamp,
           type,
           text,
           mediaUrl: actualImageUrl || actualVideoUrl,
@@ -189,7 +200,7 @@
         }),
         sender: isMe ? '我' : chatTitle,
         isMe,
-        timestamp: getTimestamp(element),
+        timestamp,
         type,
         text,
         mediaUrl: actualImageUrl || actualVideoUrl,
@@ -478,6 +489,18 @@
     return [messages.length, last?.timestamp, last?.text, last?.mediaUrl].join('|');
   }
 
+  function visibleMessageSignature(data) {
+    return (data && data.messages ? data.messages : []).map(message => [
+      message.sender,
+      message.isMe ? 'me' : 'other',
+      message.type,
+      message.text,
+      message.mediaUrl,
+      message.quote,
+      message.quoteMediaUrl
+    ].join('\u001e')).join('\u001f');
+  }
+
   async function waitForConversationChange(previousTitle, previousSignature, timeoutMs, target) {
     const started = Date.now();
     while (Date.now() - started < (timeoutMs || 15000)) {
@@ -570,20 +593,50 @@
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
 
-  function waitForMutation(target, timeoutMs) {
-    return new Promise(resolve => {
-      let finished = false;
-      const observer = new MutationObserver(() => finish(true));
-      const finish = changed => {
-        if (finished) return;
-        finished = true;
-        observer.disconnect();
-        clearTimeout(timer);
-        resolve(changed);
-      };
-      observer.observe(target || document.body, { childList: true, subtree: true, characterData: true, attributes: true });
-      const timer = setTimeout(() => finish(false), timeoutMs || 1200);
-    });
+  function triggerTopHistoryLoad(scroller) {
+    const viewportHeight = scroller === document.scrollingElement
+      ? (window.innerHeight || 600)
+      : (scroller.clientHeight || 600);
+    const nudge = Math.max(120, Math.floor(viewportHeight * 0.35));
+
+    // A synthetic wheel event reaches the same React event path as a user's
+    // wheel. The one-pixel bounce additionally retriggers top sentinels that
+    // only run when the scroll position changes from/to zero.
+    dispatchWheel(scroller, -nudge);
+    if (scroller === document.scrollingElement) {
+      window.scrollTo({ top: 1, behavior: 'auto' });
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    } else {
+      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollTop = Math.min(1, maxTop);
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      scroller.scrollTop = 0;
+    }
+    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+    dispatchWheel(scroller, -nudge);
+  }
+
+  async function waitForMessageUpdate(scroller, beforeSignature, timeoutMs) {
+    const started = Date.now();
+    let lastSignature = beforeSignature;
+    let stableRounds = 0;
+    let latest = currentMessages();
+    while (Date.now() - started < timeoutMs) {
+      checkRiskControl();
+      latest = currentMessages();
+      const signature = visibleMessageSignature(latest);
+      if (signature !== beforeSignature) {
+        if (signature === lastSignature) stableRounds += 1;
+        else stableRounds = 0;
+        lastSignature = signature;
+        // Wait for two identical reads after the first change so a virtual
+        // list has finished replacing rows before we persist the viewport.
+        if (stableRounds >= 2) return latest;
+      }
+      await sleep(180);
+    }
+    return latest;
   }
 
   function checkRiskControl() {
@@ -615,6 +668,7 @@
     const ordered = [];
     const index = new Map();
     let noNewPasses = 0;
+    let topNoNewPasses = 0;
 
     // Capture the newest viewport first. This prevents a conversation that was
     // previously left halfway up the list from losing its newest messages.
@@ -622,6 +676,7 @@
     await sleep(500);
     const newest = currentMessages();
     mergeMessages(ordered, index, newest.messages, false);
+    if (jobId) await persistMessageSnapshot(jobId, conversationId, ordered);
 
     for (let pass = 0; pass < 300; pass += 1) {
       const before = index.size;
@@ -629,25 +684,53 @@
       // Move upward in viewport-sized wheel steps. Xianyu loads older records
       // when the user approaches the top, but a single jump to scrollTop=0 can
       // leave the first page unloaded.
+      const beforeViewport = currentMessages();
+      const beforeViewportSignature = visibleMessageSignature(beforeViewport);
       const positionBefore = scrollPosition(scroller);
       const viewportHeight = scroller === document.scrollingElement
         ? (window.innerHeight || 600)
         : (scroller.clientHeight || 600);
-      const mutation = waitForMutation(scroller, positionBefore <= viewportHeight ? 2200 : 700);
       scrollUpOnePage(scroller);
-      await mutation;
-      await sleep(350);
-      checkRiskControl();
-      const current = currentMessages();
+      const current = await waitForMessageUpdate(
+        scroller,
+        beforeViewportSignature,
+        positionBefore <= viewportHeight ? 2600 : 1200
+      );
+      await sleep(300);
       mergeMessages(ordered, index, current.messages, true);
       if (index.size === before) {
         noNewPasses += 1;
       } else {
         noNewPasses = 0;
+        topNoNewPasses = 0;
         if (jobId) await persistMessageSnapshot(jobId, conversationId, ordered);
       }
       const atTop = scrollPosition(scroller) <= 4;
-      if (atTop && noNewPasses >= 3) break;
+      if (!atTop) topNoNewPasses = 0;
+
+      // On Xianyu the first page is sometimes fetched only after the chat
+      // viewport has actually reached zero. A programmatic jump can arrive at
+      // zero before that request starts, so probe the top with a small bounce
+      // and wait for the virtual list to settle. Do not finish on the first
+      // empty read at the top.
+      if (atTop && noNewPasses >= 1) {
+        const beforeTop = currentMessages();
+        const beforeTopSignature = visibleMessageSignature(beforeTop);
+        triggerTopHistoryLoad(scroller);
+        const topData = await waitForMessageUpdate(scroller, beforeTopSignature, 4200);
+        await sleep(300);
+        const beforeTopMerge = index.size;
+        mergeMessages(ordered, index, topData.messages, true);
+        if (index.size !== beforeTopMerge) {
+          noNewPasses = 0;
+          topNoNewPasses = 0;
+          if (jobId) await persistMessageSnapshot(jobId, conversationId, ordered);
+        } else {
+          topNoNewPasses += 1;
+        }
+      }
+
+      if (atTop && topNoNewPasses >= 2) break;
       if (jobId) {
         const response = await chrome.runtime.sendMessage({ action: 'JOB_SHOULD_PAUSE', jobId });
         if (response && response.pause) throw new Error('任务已暂停');
@@ -655,10 +738,8 @@
     }
 
     // Leave the page at the real top and capture one final settled DOM state.
-    const finalMutation = waitForMutation(scroller, 1800);
     scrollToTop(scroller);
-    await finalMutation;
-    await sleep(600);
+    await sleep(500);
     const finalData = currentMessages();
     const beforeFinal = index.size;
     mergeMessages(ordered, index, finalData.messages, true);
