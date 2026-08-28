@@ -392,6 +392,13 @@
       const step = Math.max(160, Math.floor(scrollTarget.clientHeight * 0.8));
       scrollTarget.scrollTop = Math.min(scrollTarget.scrollHeight, scrollTarget.scrollTop + step);
       scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+      // Some Xianyu layouts virtualize the sidebar without exposing a useful
+      // scrollTop on its wrapper. Moving the last visible row to the bottom
+      // gives the real list viewport a native scroll action as a fallback.
+      if (scrollTarget.scrollTop === before && nodes.length) {
+        nodes[nodes.length - 1].scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+        scrollTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }
       // Xianyu may request the next page only after the list reaches the
       // bottom. Give the DOM and the network-backed virtual list time to grow.
       await sleep(900);
