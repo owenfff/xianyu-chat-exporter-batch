@@ -315,8 +315,10 @@
     button.disabled = true;
     button.textContent = '打包中…';
     try {
-      await buildAndDownloadJob(job.jobId);
-      showNotice('ZIP 导出完成。');
+      const result = await buildAndDownloadJob(job.jobId);
+      showNotice(result.skipped
+        ? 'ZIP 导出完成，已包含 ' + result.exported + ' 个已处理会话，跳过 ' + result.skipped + ' 个未处理会话。'
+        : 'ZIP 导出完成。');
     } catch (error) {
       showNotice(error.message || 'ZIP 导出失败', true);
     } finally {
@@ -329,14 +331,25 @@
   async function buildAndDownloadJob(jobId) {
     const storedJob = await XianyuStorage.getJob(jobId);
     if (!storedJob) throw new Error('批量任务不存在');
-    const records = await XianyuStorage.getConversations(jobId);
-    const recordById = Object.fromEntries(records.map(record => [record.id, record]));
+    const exportRecords = [];
+    for (const conversation of storedJob.conversations) {
+      const messages = await XianyuStorage.getMessages(jobId, conversation.id);
+      const mediaRecords = await XianyuStorage.getMedia(jobId, conversation.id);
+      // A paused/stopped task can contain many pending conversations. Do not
+      // create empty HTML/JSON files for those; export completed and partial
+      // conversations only so the archive remains useful and easy to open.
+      if (conversation.status !== 'completed' && !messages.length && !mediaRecords.length) continue;
+      exportRecords.push({ conversation, messages, mediaRecords });
+    }
     const entries = [];
     const manifest = {
       schemaVersion: 1,
       jobId,
       exportedAt: new Date().toISOString(),
       status: storedJob.status,
+      totalConversations: storedJob.conversations.length,
+      exportedConversations: exportRecords.length,
+      skippedConversationCount: storedJob.conversations.length - exportRecords.length,
       conversations: [],
       mediaFailures: []
     };
@@ -351,10 +364,11 @@
       return name;
     };
 
-    for (const conversation of storedJob.conversations) {
+    for (const exportRecord of exportRecords) {
+      const conversation = exportRecord.conversation;
       const name = makeName(conversation.title);
-      const messagesForConversation = await XianyuStorage.getMessages(jobId, conversation.id);
-      const mediaRecords = await XianyuStorage.getMedia(jobId, conversation.id);
+      const messagesForConversation = exportRecord.messages;
+      const mediaRecords = exportRecord.mediaRecords;
       const mediaByUrl = Object.fromEntries(mediaRecords.map(record => [record.url, record]));
       const htmlPath = 'conversations/' + name + '.html';
       const rawPath = 'raw/' + name + '.json';
@@ -393,10 +407,12 @@
     try {
       const blob = await XianyuZip.createZipBlob(entries);
       downloadBlob(blob, '闲鱼聊天备份_' + XianyuExporter.dateString() + '.zip', 'application/zip');
+      return { exported: exportRecords.length, skipped: manifest.skippedConversationCount };
     } catch (error) {
       if (!storedJob.conversations.length) throw error;
       showNotice('批量 ZIP 过大，改为按会话拆分下载。');
       await downloadConversationParts(storedJob, manifest);
+      return { exported: exportRecords.length, skipped: manifest.skippedConversationCount };
     }
   }
 

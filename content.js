@@ -3,6 +3,7 @@
 
   const SELECTORS = {
     messageItems: '[class*="ant-list-item"]',
+    conversationItems: 'li,[role="button"],[class*="ant-list-item"],[class*="conversation"],[class*="session"],[class*="contact"],[class*="roster"],[class*="list-item"],[class*="user-item"],[class*="chat-item"]',
     messageText: '[class*="message-text"]',
     imageContainer: '[class*="image-container"]',
     quoteContainer: '[class*="reply-container"]',
@@ -272,20 +273,20 @@
     const text = cleanText(element.innerText || element.textContent);
     if (text.length < 1 || text.length > 180) return false;
     const className = String(element.className || '');
-    const likelyClass = /(conversation|session|contact|chat|roster|list-item|user-item)/i.test(className);
+    const likelyClass = /(conversation|session|contact|chat[-_]?item|roster|list[-_]?item|user[-_]?item|ant-list-item)/i.test(className);
     const avatar = element.querySelector('img');
     const role = element.getAttribute('role');
     const cursor = getComputedStyle(element).cursor;
-    return likelyClass || role === 'button' || cursor === 'pointer' || Boolean(avatar);
+    const rect = element.getBoundingClientRect();
+    const rowLike = rect.width >= 140 && rect.height >= 28 && rect.height <= 180;
+    return rowLike && (likelyClass || role === 'button' || cursor === 'pointer' || Boolean(avatar));
   }
 
   function findConversationContainer() {
     const containers = [document.body, ...allScrollableElements(document)];
     let best = { element: document.body, score: -1, candidates: [] };
     containers.forEach(container => {
-      const nodes = Array.from(container.querySelectorAll(
-        '[role="button"],li,[class*="conversation"],[class*="session"],[class*="contact"],[class*="chat"],[class*="list-item"],[class*="user-item"]'
-      )).filter(isConversationCandidate);
+      const nodes = conversationNodes(container);
       const unique = [];
       const seen = new Set();
       nodes.forEach(node => {
@@ -415,9 +416,16 @@
   }
 
   function conversationNodes(container) {
-    return Array.from(container.querySelectorAll(
-      '[role="button"],li,[class*="conversation"],[class*="session"],[class*="contact"],[class*="chat"],[class*="list-item"],[class*="user-item"]'
-    )).filter(isConversationCandidate);
+    const candidates = Array.from(container.querySelectorAll(SELECTORS.conversationItems)).filter(isConversationCandidate);
+    const candidateSet = new Set(candidates);
+    return candidates.filter(node => {
+      let parent = node.parentElement;
+      while (parent && parent !== container) {
+        if (candidateSet.has(parent)) return false;
+        parent = parent.parentElement;
+      }
+      return true;
+    });
   }
 
   function matchConversationNode(nodes, conversation) {
