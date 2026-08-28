@@ -538,16 +538,30 @@
     const message = Array.from(document.querySelectorAll(SELECTORS.messageItems)).find(hasMessageMarker);
     let current = message;
     const candidates = [];
+    let distance = 0;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
     while (current) {
-      if (isScrollable(current)) candidates.push(current);
+      if (isScrollable(current)) {
+        const style = getComputedStyle(current);
+        const rect = current.getBoundingClientRect();
+        const messageCount = current.querySelectorAll(SELECTORS.messageItems).length;
+        const nativeOverflow = /(auto|scroll|overlay)/.test(style.overflowY);
+        const centralPanel = viewportWidth > 0 && rect.left > viewportWidth * 0.15 &&
+          rect.right < viewportWidth * 0.95;
+        candidates.push({
+          element: current,
+          score: Math.min(messageCount, 20) * 4 +
+            (nativeOverflow ? 45 : 0) +
+            (centralPanel ? 18 : 0) +
+            Math.max(0, 24 - distance * 8),
+          distance
+        });
+      }
       current = current.parentElement;
+      distance += 1;
     }
-    candidates.sort((a, b) => {
-      const aCount = a.querySelectorAll(SELECTORS.messageItems).length;
-      const bCount = b.querySelectorAll(SELECTORS.messageItems).length;
-      return bCount - aCount;
-    });
-    return candidates[0] || document.scrollingElement;
+    candidates.sort((a, b) => b.score - a.score || a.distance - b.distance);
+    return candidates[0]?.element || document.scrollingElement;
   }
 
   function scrollToTop(scroller) {
@@ -584,19 +598,26 @@
     }
   }
 
-  function scrollUpOnePage(scroller) {
+  async function scrollUpOnePage(scroller) {
     const viewportHeight = scroller === document.scrollingElement
       ? (window.innerHeight || 600)
       : (scroller.clientHeight || 600);
-    const amount = Math.max(160, Math.floor(viewportHeight * 0.72));
-    const current = scrollPosition(scroller);
-    dispatchWheel(scroller, -amount);
-    if (scroller === document.scrollingElement) {
-      window.scrollTo({ top: Math.max(0, current - amount), behavior: 'auto' });
-    } else {
-      scroller.scrollTop = Math.max(0, current - amount);
+    const amount = Math.max(120, Math.floor(viewportHeight * 0.36));
+    const tick = Math.max(40, Math.floor(amount / 3));
+
+    // Imitate a user's continuous wheel movement: several small wheel ticks
+    // are more reliable for Xianyu's virtual list than one large jump.
+    for (let index = 0; index < 3; index += 1) {
+      const current = scrollPosition(scroller);
+      dispatchWheel(scroller, -tick);
+      if (scroller === document.scrollingElement) {
+        window.scrollTo({ top: Math.max(0, current - tick), behavior: 'auto' });
+      } else {
+        scroller.scrollTop = Math.max(0, current - tick);
+      }
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await sleep(80);
     }
-    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
 
   function triggerTopHistoryLoad(scroller) {
@@ -608,7 +629,7 @@
     // A synthetic wheel event reaches the same React event path as a user's
     // wheel. The one-pixel bounce additionally retriggers top sentinels that
     // only run when the scroll position changes from/to zero.
-    dispatchWheel(scroller, -nudge);
+    for (let index = 0; index < 3; index += 1) dispatchWheel(scroller, -nudge);
     if (scroller === document.scrollingElement) {
       window.scrollTo({ top: 1, behavior: 'auto' });
       scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
@@ -620,22 +641,26 @@
       scroller.scrollTop = 0;
     }
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
-    dispatchWheel(scroller, -nudge);
+    for (let index = 0; index < 3; index += 1) dispatchWheel(scroller, -nudge);
   }
 
-  async function waitForMessageUpdate(scroller, beforeSignature, timeoutMs) {
+  async function waitForMessageUpdate(scroller, beforeSignature, beforeHeight, timeoutMs) {
     const started = Date.now();
     let lastSignature = beforeSignature;
+    let lastHeight = beforeHeight;
     let stableRounds = 0;
     let latest = currentMessages();
     while (Date.now() - started < timeoutMs) {
       checkRiskControl();
       latest = currentMessages();
       const signature = visibleMessageSignature(latest);
-      if (signature !== beforeSignature) {
-        if (signature === lastSignature) stableRounds += 1;
+      const currentHeight = scroller ? scroller.scrollHeight : beforeHeight;
+      const heightChanged = currentHeight !== beforeHeight;
+      if (signature !== beforeSignature || heightChanged) {
+        if (signature === lastSignature && currentHeight === lastHeight) stableRounds += 1;
         else stableRounds = 0;
         lastSignature = signature;
+        lastHeight = currentHeight;
         // Wait for two identical reads after the first change so a virtual
         // list has finished replacing rows before we persist the viewport.
         if (stableRounds >= 2) return latest;
@@ -693,13 +718,15 @@
       const beforeViewport = currentMessages();
       const beforeViewportSignature = visibleMessageSignature(beforeViewport);
       const positionBefore = scrollPosition(scroller);
+      const heightBefore = scroller.scrollHeight;
       const viewportHeight = scroller === document.scrollingElement
         ? (window.innerHeight || 600)
         : (scroller.clientHeight || 600);
-      scrollUpOnePage(scroller);
+      await scrollUpOnePage(scroller);
       const current = await waitForMessageUpdate(
         scroller,
         beforeViewportSignature,
+        heightBefore,
         positionBefore <= viewportHeight ? 2600 : 1200
       );
       await sleep(300);
@@ -722,8 +749,9 @@
       if (atTop && noNewPasses >= 1) {
         const beforeTop = currentMessages();
         const beforeTopSignature = visibleMessageSignature(beforeTop);
+        const beforeTopHeight = scroller.scrollHeight;
         triggerTopHistoryLoad(scroller);
-        const topData = await waitForMessageUpdate(scroller, beforeTopSignature, 4200);
+        const topData = await waitForMessageUpdate(scroller, beforeTopSignature, beforeTopHeight, 4200);
         await sleep(300);
         const beforeTopMerge = index.size;
         mergeMessages(ordered, index, topData.messages, true);
