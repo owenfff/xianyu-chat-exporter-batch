@@ -286,7 +286,7 @@
   async function controlJob(action) {
     if (!job) return;
     try {
-      const response = await sendRuntime({ action, jobId: job.jobId });
+      const response = await sendRuntime({ action, jobId: job.jobId, tabId: activeTab?.id || null });
       if (!response || response.ok === false) throw new Error(response?.error || '任务控制失败');
       job = response.job;
       renderJob();

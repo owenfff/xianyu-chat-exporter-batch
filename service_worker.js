@@ -87,6 +87,41 @@ async function sendToTab(tabId, payload) {
   }
 }
 
+function isXianyuUrl(url) {
+  try {
+    return /(^|\.)((goofish|xianyu)\.com)$/i.test(new URL(url).hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function resolveXianyuTab(preferredTabId, previousTabId) {
+  const candidates = [];
+  for (const tabId of [preferredTabId, previousTabId]) {
+    if (!tabId || candidates.some(tab => tab.id === tabId)) continue;
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (isXianyuUrl(tab.url)) candidates.push(tab);
+    } catch (_) {
+      // The tab may have been closed; continue with the current Xianyu tabs.
+    }
+  }
+  const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  activeTabs.forEach(tab => {
+    if (isXianyuUrl(tab.url) && !candidates.some(item => item.id === tab.id)) candidates.push(tab);
+  });
+  if (!candidates.length) {
+    const xianyuTabs = await chrome.tabs.query({
+      url: ['*://xianyu.com/*', '*://*.xianyu.com/*', '*://goofish.com/*', '*://*.goofish.com/*']
+    });
+    xianyuTabs.forEach(tab => {
+      if (!candidates.some(item => item.id === tab.id)) candidates.push(tab);
+    });
+  }
+  if (!candidates.length) throw new Error('请先打开已登录的闲鱼卖家页面，再点击继续任务。');
+  return candidates[0];
+}
+
 function extensionForMime(mime, url) {
   const known = {
     'image/jpeg': 'jpg',
@@ -322,7 +357,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       if (message.action === 'RESUME_JOB') {
-        const job = await updateJob(message.jobId, { status: 'running', pauseReason: '' });
+        const current = await XianyuStorage.getJob(message.jobId);
+        if (!current) throw new Error('批量任务不存在');
+        const tab = await resolveXianyuTab(message.tabId, current.tabId);
+        const job = await updateJob(message.jobId, item => {
+          item.status = 'running';
+          item.pauseReason = '';
+          item.tabId = tab.id;
+          return item;
+        });
         const control = controlFor(message.jobId);
         control.pauseRequested = false;
         control.stopRequested = false;
