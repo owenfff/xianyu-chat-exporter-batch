@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "闲鱼聊天记录批量导出",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "批量导出闲鱼聊天记录，支持单聊、断点恢复和本地媒体归档",
   "permissions": ["activeTab", "scripting", "downloads", "storage", "notifications"],
   "host_permissions": [

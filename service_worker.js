@@ -305,6 +305,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message.action === 'CONVERSATION_CHUNK') {
         await XianyuStorage.putMessages(message.jobId, message.conversationId, message.messages || []);
+        const messageCount = (await XianyuStorage.getMessages(message.jobId, message.conversationId)).length;
+        await updateConversation(message.jobId, message.conversationId, item => {
+          item.messageCount = messageCount;
+          item.error = '';
+        });
         sendResponse({ ok: true });
         return;
       }

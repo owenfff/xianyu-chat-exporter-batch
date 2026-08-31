@@ -324,7 +324,10 @@
     const current = job.conversations.find(item => item.status === 'running' || item.status === 'paused');
     const labels = { pending: '等待开始', running: '运行中', paused: '已暂停', completed: '已完成', stopped: '已停止' };
     $('jobStatus').textContent = labels[job.status] || job.status;
-    $('jobNote').textContent = job.pauseReason || (current && current.error) || '';
+    const currentProgress = current && job.status === 'running'
+      ? '正在处理：' + current.title + '（已采集 ' + (current.messageCount || 0) + ' 条消息，完成后总数才会增加）'
+      : '';
+    $('jobNote').textContent = job.pauseReason || (current && current.error) || currentProgress;
     $('jobNote').classList.toggle('hidden', !$('jobNote').textContent);
     const active = job.status === 'running';
     const paused = job.status === 'paused';
